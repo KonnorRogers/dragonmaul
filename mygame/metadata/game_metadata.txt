@@ -27,7 +27,7 @@ orientation=landscape
 # | - 2: best visual quality (option 1 and 2 are the same and resolve to the same value for backwards compatability)
 # | - 3: SDL3's pixel art shader (if your game uses pixel art, then this may be the best option)
 # +=====================================
-scale_quality=2
+scale_quality=3
 
 # +== HD Mode ===
 # | HD Mode: Set hd=false for low rez games
@@ -82,7 +82,7 @@ hd=true
 # +== High DPI ===
 # | Setting this property to true will enable High DPI rendering (try in combination with scale_quality to see what looks best)
 # +===============
-# highdpi=false
+highdpi=true
 
 # +== Texture Atlases ===
 # | See sample app for texture atlas usage: =./samples/07_advanced_rendering_hd/02_texture_atlases=
