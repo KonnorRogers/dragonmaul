@@ -11,15 +11,6 @@ module App
       # e.target_y = nrow * TILE + TILE/2
     end
 
-    def update(...)
-      @x += (@target_x - @x) * 0.2
-      @y += (@target_y - @y) * 0.2
-      if (@target_x - @x).abs < 0.5 && (@target_y - @y).abs < 0.5
-        @x, @y = @target_x, @target_y    # snap to exact center
-        # now idle again, ready for next input
-      end
-      super(...)
-    end
     # attr_accessor :home_x, :home_y, :ai_state, :aggro_range, :max_roam
 
     # def initialize(...)

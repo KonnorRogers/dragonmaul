@@ -1,7 +1,9 @@
 module App
   class Map
-    attr_accessor :w, :h, :tile_size, :tiles, :chunk_px
+    attr_accessor :w, :h, :tile_size, :tiles, :chunk_px, :flow
 
+    NEIGHBORS = [[1, 0], [-1, 0], [0, 1], [0, -1]]
+    DIAGONALS = [[1, 1], [1, -1], [-1, 1], [-1, -1]]
     CHUNK_TILES = 32  # 32x32 tiles per chunk = 512px at tile_size 16
 
     def initialize(w:, h:, tile_size: 128)
@@ -139,6 +141,7 @@ module App
       end
       true
     end
+
     def buildings_in_viewport(camera)
       world = camera.to_world_space!(camera.viewport.dup)
       min_tx = (world.x / @tile_size).floor - 4  # pad by max building size in tiles
@@ -170,6 +173,130 @@ module App
 
       occupy!(tile_x, tile_y, w, h, building)
       @buildings << building
+    end
+
+    def compute_flow_field(goal_tx, goal_ty)
+      @flow = {}
+      @flow[chunk_key(goal_tx, goal_ty)] = 0
+      queue = [[goal_tx, goal_ty]]
+      head = 0
+      while head < queue.length
+        tx, ty = queue[head]
+        head += 1
+        d = @flow[chunk_key(tx, ty)]
+        NEIGHBORS.each do |dx, dy|
+          nx = tx + dx
+          ny = ty + dy
+          next if nx < 0 || ny < 0 || nx >= @w || ny >= @h
+          nkey = chunk_key(nx, ny)
+          next if @flow.key?(nkey)     # already visited
+          next if occupied?(nx, ny)    # buildings block the flow
+          @flow[nkey] = d + 1
+          queue << [nx, ny]
+        end
+      end
+    end
+
+    # For a creep on tile (tx,ty): the neighbor with the lowest distance.
+    def next_step(tx, ty)
+      here = @flow[chunk_key(tx, ty)]
+
+      # creep is on a tile with no flow value (e.g. a building was just
+      # dropped on it) — escape to any neighbor that has a distance
+      if here.nil?
+        best = nil
+        best_d = nil
+        (NEIGHBORS + DIAGONALS).each do |dx, dy|
+          d = @flow[chunk_key(tx + dx, ty + dy)]
+          if d && (best_d.nil? || d < best_d)
+            best_d = d
+            best = [tx + dx, ty + dy]
+          end
+        end
+        return best
+      end
+
+      best = nil
+      best_d = here
+      NEIGHBORS.each do |dx, dy|
+        d = @flow[chunk_key(tx + dx, ty + dy)]
+        if d && d < best_d
+          best_d = d
+          best = [tx + dx, ty + dy]
+        end
+      end
+      DIAGONALS.each do |dx, dy|
+        next if occupied?(tx + dx, ty) || occupied?(tx, ty + dy)
+        d = @flow[chunk_key(tx + dx, ty + dy)]
+        if d && d < best_d
+          best_d = d
+          best = [tx + dx, ty + dy]
+        end
+      end
+      best
+    end
+
+    def creep_on_footprint?(tx, ty, w, h, enemies, ts)
+      enemies.any? do |e|
+        ex = (e.x / ts).floor
+        ey = (e.y / ts).floor
+        ex >= tx && ex < tx + w && ey >= ty && ey < ty + h
+      end
+    end
+
+    def would_block_path?(tx, ty, w, h, spawn, goal)
+      blocked = {}
+      w.times { |dx| h.times { |dy| blocked[chunk_key(tx + dx, ty + dy)] = true } }
+
+      visited = { chunk_key(goal[0], goal[1]) => true }
+      queue = [goal]
+      head = 0
+      while head < queue.length
+        cx, cy = queue[head]; head += 1
+        return false if cx == spawn[0] && cy == spawn[1]   # goal reaches spawn → not blocked
+        NEIGHBORS.each do |dx, dy|
+          nx = cx + dx; ny = cy + dy
+          next if nx < 0 || ny < 0 || nx >= @w || ny >= @h
+          k = chunk_key(nx, ny)
+          next if visited[k] || occupied?(nx, ny) || blocked[k]
+          visited[k] = true
+          queue << [nx, ny]
+        end
+      end
+      true   # never reached spawn → it would wall off the maze
+    end
+    def los_clear?(x0, y0, x1, y1)
+      ts = @tile_size
+      dx = x1 - x0
+      dy = y1 - y0
+      dist = Math.sqrt(dx * dx + dy * dy)
+      return true if dist == 0
+
+      steps = [(dist / (ts * 0.25)).ceil, 1].max  # sample 4x per tile
+      i = 0
+      while i <= steps
+        t = i.to_f / steps
+        tx = ((x0 + dx * t) / ts).floor
+        ty = ((y0 + dy * t) / ts).floor
+        return false if occupied?(tx, ty)
+        i += 1
+      end
+      true
+    end
+
+    def lookahead_path(tx, ty, max_len = 8)
+      path = []
+      cx = tx
+      cy = ty
+      max_len.times do
+        step = next_step(cx, cy)
+        break if step.nil?
+        break if step[0] == cx && step[1] == cy
+        path << step
+        cx = step[0]
+        cy = step[1]
+      end
+      path
     end
   end
 end

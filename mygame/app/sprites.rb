@@ -23,6 +23,7 @@ module App
     wall: {
     },
     goblin: {
+      speed: 100,
       animations: {
         idle: {
           source_x: 8,
