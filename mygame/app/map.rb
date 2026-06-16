@@ -134,7 +134,7 @@ module App
         h_tiles.times do |dy|
           x = tx + dx
           y = ty + dy
-          return false if x < 0 || y < 0 || x >= @w || y >= @h
+          return false if (x < 0 || y < 0) || (x >= @w || y >= @h)
           return false if occupied?(x, y)
           return false unless @tiles[chunk_key(x, y)] == :ground # buildable terrain only
         end
@@ -227,8 +227,9 @@ module App
       end
       DIAGONALS.each do |dx, dy|
         next if occupied?(tx + dx, ty) || occupied?(tx, ty + dy)
+        # Add +0.4 for diagonals as they cost extra to move.
         d = @flow[chunk_key(tx + dx, ty + dy)]
-        if d && d < best_d
+        if d && (d + 0.4) < best_d
           best_d = d
           best = [tx + dx, ty + dy]
         end
@@ -264,39 +265,6 @@ module App
         end
       end
       true   # never reached spawn → it would wall off the maze
-    end
-    def los_clear?(x0, y0, x1, y1)
-      ts = @tile_size
-      dx = x1 - x0
-      dy = y1 - y0
-      dist = Math.sqrt(dx * dx + dy * dy)
-      return true if dist == 0
-
-      steps = [(dist / (ts * 0.25)).ceil, 1].max  # sample 4x per tile
-      i = 0
-      while i <= steps
-        t = i.to_f / steps
-        tx = ((x0 + dx * t) / ts).floor
-        ty = ((y0 + dy * t) / ts).floor
-        return false if occupied?(tx, ty)
-        i += 1
-      end
-      true
-    end
-
-    def lookahead_path(tx, ty, max_len = 8)
-      path = []
-      cx = tx
-      cy = ty
-      max_len.times do
-        step = next_step(cx, cy)
-        break if step.nil?
-        break if step[0] == cx && step[1] == cy
-        path << step
-        cx = step[0]
-        cy = step[1]
-      end
-      path
     end
   end
 end

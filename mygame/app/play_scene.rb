@@ -3,14 +3,14 @@ module App
     attr_accessor :map, :camera, :zoom, :current_building, :world_mouse, :tick_count
 
     def initialize
-      w = 50
+      w = 20
       h = 50
       @tile_size = 32
       @current_wave = 0
       @map = App::Map.new(w: w, h: h, tile_size: @tile_size)
       @camera = SpriteKit::Camera.new(path: :camera)
       @spawn_tile = [@map.w / 2, @map.h - 2]
-      @goal_tile = [@map.w / 2, 1]
+      @goal_tile = [@map.w / 2, 0]
       @enemies_to_spawn = 50
       # @zoom = {
       #   default: 1,
@@ -50,6 +50,30 @@ module App
           }
         end
       end
+
+      open_right = nil
+      @map.w.times do |x|
+        @map.h.times do |y|
+          if !(x >= 0 && x < @map.w && y > @map.h - 20 && y < @map.h - 10)
+            next
+          end
+
+          if x % 2 == 0 && y % 4 == 0
+            open_right = y if !open_right
+
+            building = SPRITES.cannon.dup
+
+            if open_right == y && x >= @map.w - 2
+              next
+            elsif open_right != y && x < 2
+              # open_right = !open_right
+              next
+            end
+
+            @map.place_building!(building, tile_x: x, tile_y: y)
+          end
+        end
+      end
     end
 
     def tick(args)
@@ -81,7 +105,7 @@ module App
       x = (@spawn_tile[0] + 0.5) * ts
       y = (@spawn_tile[1] + 0.5) * ts
       enemy_type = :goblin
-      e = Enemy.new(engine: self, x: x, y: y, w: 32, h: 32, state: :walking, **SPRITES[enemy_type])
+      e = Enemy.new(engine: self, x: x, y: y, w: 64, h: 64, state: :walking, **SPRITES[enemy_type])
       e.target_x = x
       e.target_y = y
       @enemies << e
@@ -100,7 +124,6 @@ module App
         @placement_tx = ((@world_mouse.x - @current_building.w / 2) / tile_size).round
         @placement_ty = ((@world_mouse.y - @current_building.h / 2) / tile_size).round
         @placement_valid = @map.can_place?(@placement_tx, @placement_ty, 2, 2) &&
-                            !@map.would_block_path?(@placement_tx, @placement_ty, 2, 2, @spawn_tile, @goal_tile) &&
                             !@map.creep_on_footprint?(@placement_tx, @placement_ty, 2, 2, @enemies, @map.tile_size)
 
         @current_building.x = @placement_tx * tile_size
@@ -318,58 +341,43 @@ module App
       return (min + max) * 0.5 if min > max
       value.clamp(min, max)
     end
+
     def advance_enemy(e)
       budget = (e.speed / 100) * (45 / 60)
-      ts = @map.tile_size
 
-      retarget_enemy(e)   # farthest visible waypoint from current position
-
+      tile_size = @map.tile_size
       while budget > 0
-        break if e.target_x.nil?
+        if e.target_x.nil?
+          step = @map.next_step((e.x / tile_size).floor, (e.y / tile_size).floor)
+          puts step.inspect
+          break unless step
+          e.target_x = (step[0] + 0.5) * tile_size
+          e.target_y = (step[1] + 0.5) * tile_size
+        end
 
         dx = e.target_x - e.x
         dy = e.target_y - e.y
         dist = Math.sqrt(dx * dx + dy * dy)
 
         if dist <= budget
-          e.x = e.target_x          # arrive exactly
+          e.x = e.target_x
           e.y = e.target_y
-          budget -= dist            # spend only what the hop cost
-          retarget_enemy(e)         # arrived mid-tick; re-pull a new target
-          break if e.target_x.nil?  # reached the goal
+          budget -= dist
+          step = @map.next_step((e.x / tile_size).floor, (e.y / tile_size).floor)
+          if step
+            # puts step.inspect
+            e.target_x = (step[0] + 0.5) * tile_size
+            e.target_y = (step[1] + 0.5) * tile_size
+          else
+            e.target_x = nil
+            break
+          end
         else
-          e.x += (dx / dist) * budget   # move at fixed speed along the heading
+          e.x += (dx / dist) * budget
           e.y += (dy / dist) * budget
           budget = 0
         end
       end
-    end
-
-    def retarget_enemy(e)
-      ts = @map.tile_size
-      tx = (e.x / ts).floor
-      ty = (e.y / ts).floor
-
-      path = @map.lookahead_path(tx, ty)
-      if path.empty?
-        e.target_x = nil
-        e.target_y = nil
-        return
-      end
-
-      chosen = path.first   # safe fallback: the immediate field step (always adjacent)
-      path.each do |(px, py)|
-        cx = (px + 0.5) * ts
-        cy = (py + 0.5) * ts
-        if @map.los_clear?(e.x, e.y, cx, cy)
-          chosen = [px, py]
-        else
-          break               # string-pull: stop at first node we can't see
-        end
-      end
-
-      e.target_x = (chosen[0] + 0.5) * ts
-      e.target_y = (chosen[1] + 0.5) * ts
     end
   end
 end
