@@ -52,6 +52,8 @@ module App
       end
 
       open_right = nil
+      building = SPRITES.cannon.dup
+      @map.place_building!(building, tile_x: @map.w, tile_y: @map.h)
       @map.w.times do |x|
         @map.h.times do |y|
           if !(x >= 0 && x < @map.w && y > @map.h - 20 && y < @map.h - 10)
@@ -71,6 +73,7 @@ module App
             end
 
             @map.place_building!(building, tile_x: x, tile_y: y)
+            puts "occupied after place: #{@map.instance_variable_get(:@occupied).keys.map { |k| [@map.chunk_key_to_cx(k), @map.chunk_key_to_cy(k)] }}"
           end
         end
       end
@@ -349,7 +352,6 @@ module App
       while budget > 0
         if e.target_x.nil?
           step = @map.next_step((e.x / tile_size).floor, (e.y / tile_size).floor)
-          puts step.inspect
           break unless step
           e.target_x = (step[0] + 0.5) * tile_size
           e.target_y = (step[1] + 0.5) * tile_size

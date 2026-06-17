@@ -230,7 +230,7 @@ module App
         # Add +0.4 for diagonals as they cost extra to move.
         d = @flow[chunk_key(tx + dx, ty + dy)]
         if d && (d + 0.4) < best_d
-          best_d = d
+          best_d = d + 0.4
           best = [tx + dx, ty + dy]
         end
       end
