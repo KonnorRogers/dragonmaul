@@ -1,9 +1,7 @@
 module App
   class Map
-    attr_accessor :w, :h, :tile_size, :tiles, :chunk_px, :flow
+    attr_accessor :w, :h, :tile_size, :tiles, :chunk_px, :occupied, :buildings, :camera_start, :spawn_points, :goal, :goal_tile, :waypoints
 
-    NEIGHBORS = [[1, 0], [-1, 0], [0, 1], [0, -1]]
-    DIAGONALS = [[1, 1], [1, -1], [-1, 1], [-1, -1]]
     CHUNK_TILES = 32  # 32x32 tiles per chunk = 512px at tile_size 16
 
     def initialize(w:, h:, tile_size: 128)
@@ -15,7 +13,14 @@ module App
       @occupied = {}
       @buildings = {}
 
-      generate
+      @camera_start = {
+        x: 0,
+        y: 0,
+      }
+
+
+      # generate
+      load_level
     end
 
     # Pack individual tile coords into a hash key
@@ -33,6 +38,80 @@ module App
           @tiles[chunk_key(row, col)] = :ground
         end
       end
+    end
+
+    def load_level(level = 0)
+      full_file = "data/maps/dragonmaul/level_#{level}.ldtkl"
+      full_data = DR.parse_json_file(full_file)
+      dir = "data/maps/dragonmaul/simplified/level_#{level}"
+      data = DR.parse_json_file("#{dir}/data.json")
+      w = data["width"]
+      h = data["height"]
+      layers = data["layers"]
+
+      # For some reason the simplified int grid only writes 256 columns, instead of the ~900 or so.
+      # int_grid = DR.read_file("#{dir}/int_grid.csv")
+      int_grid = full_data["layerInstances"].find do |hash|
+        hash["__identifier"] == "int_grid"
+      end
+
+      int_grid_csv = int_grid["intGridCsv"]
+
+
+      @w = int_grid["__cWid"]
+      @h = int_grid["__cHei"]
+
+      @tiles = {}
+      grid_size = int_grid["__gridSize"]   # px-per-cell LDtk authored with (likely 16)
+      cam = data["entities"]["camera_start"][0]
+
+      @camera_start = {
+        x: (cam["x"] / grid_size) * @tile_size,
+        y: (cam["y"] / grid_size) * @tile_size,
+      }
+
+      @spawn_points = []
+
+      data["entities"]["spawn_points"].each do |point|
+        # y is flipped in DR compared to LDTK
+        y = h - point["y"] - 100
+        @spawn_points << {
+          x: (point["x"] / grid_size) * (@tile_size / grid_size),
+          y: (y / grid_size) * (@tile_size / grid_size)
+        }
+      end
+
+      @goal_tile = {}
+      goal = data["entities"]["goal"][0]
+      @goal_tile.x = goal["x"] / grid_size
+      @goal_tile.y = (h - goal["y"]) / grid_size
+
+      @goal = {
+        x: @goal_tile.x * @tile_size,
+        y: @goal_tile.y * @tile_size,
+        w: @tile_size * 3,
+        h: @tile_size * 3,
+      }
+
+      # waypoints = data["entities"]["waypoints"]
+
+      # @waypoints = []
+      # waypoints.each do |wp|
+      #   @waypoints << {
+      #     x: wp["x"] / grid_size,
+      #     y: (h - wp["y"]) / grid_size
+      #   }
+      # end
+
+      int_grid_csv.each_with_index do |value, i|
+        next if value.zero?           # skip empty cells
+
+        x = i % @w
+        y = @h - 1 - (i / @w).floor
+
+        @tiles[chunk_key(x, y)] = :ground
+      end
+      # puts "columns: #{col}, rows: #{row}"
     end
 
     def tiles_in_viewport(camera, largest_tile: @tile_size)
@@ -72,6 +151,7 @@ module App
       @rendered_chunks ||= {}
       key = chunk_key(cx, cy)
       return if @rendered_chunks[key]
+
       @rendered_chunks[key] = true
 
       rt = args.outputs[rt_name(cx, cy)]
@@ -129,7 +209,7 @@ module App
       end
     end
 
-    def can_place?(tx, ty, w_tiles, h_tiles)
+    def can_place?(tx, ty, w_tiles, h_tiles, enemies)
       w_tiles.times do |dx|
         h_tiles.times do |dy|
           x = tx + dx
@@ -137,6 +217,12 @@ module App
           return false if (x < 0 || y < 0) || (x >= @w || y >= @h)
           return false if occupied?(x, y)
           return false unless @tiles[chunk_key(x, y)] == :ground # buildable terrain only
+          return false if Geometry.find_intersect_rect({
+            x: (x * @tile_size).floor,
+            y: (y * @tile_size).floor,
+            w: @tile_size,
+            h: @tile_size
+          }, enemies)
         end
       end
       true
@@ -163,108 +249,39 @@ module App
       result
     end
 
-    def place_building!(building, tile_x:, tile_y:, w: 2, h: 2)
+    def place_building!(building, tile_x:, tile_y:)
       tile_size = @tile_size
       building = building.dup
       building.x = tile_x * tile_size
       building.y = tile_y * tile_size
-      building.w = tile_size * w
-      building.h = tile_size * h
+      building.w = tile_size * building.tiles
+      building.h = tile_size * building.tiles
+      building.hp = 100
+      building.id = DR.create_uuid
 
-      occupy!(tile_x, tile_y, w, h, building)
-      @buildings << building
+      occupy!(tile_x, tile_y, building.tiles, building.tiles, building)
+      @buildings[building.id] = building
+      building
     end
 
-    def compute_flow_field(goal_tx, goal_ty)
-      @flow = {}
-      @flow[chunk_key(goal_tx, goal_ty)] = 0
-      queue = [[goal_tx, goal_ty]]
-      head = 0
-      while head < queue.length
-        tx, ty = queue[head]
-        head += 1
-        d = @flow[chunk_key(tx, ty)]
-        NEIGHBORS.each do |dx, dy|
-          nx = tx + dx
-          ny = ty + dy
-          next if nx < 0 || ny < 0 || nx >= @w || ny >= @h
-          nkey = chunk_key(nx, ny)
-          next if @flow.key?(nkey)     # already visited
-          next if occupied?(nx, ny)    # buildings block the flow
-          @flow[nkey] = d + 1
-          queue << [nx, ny]
-        end
-      end
+    def damage_building!(building, amount)
+      building.hp -= amount
+      # building.hp -= 33
+      return false if building.hp > 0
+      remove_building!(building)
+      true   # destroyed this hit
     end
 
-    # For a creep on tile (tx,ty): the neighbor with the lowest distance.
-    def next_step(tx, ty)
-      here = @flow[chunk_key(tx, ty)]
-
-      # creep is on a tile with no flow value (e.g. a building was just
-      # dropped on it) — escape to any neighbor that has a distance
-      if here.nil?
-        best = nil
-        best_d = nil
-        (NEIGHBORS + DIAGONALS).each do |dx, dy|
-          d = @flow[chunk_key(tx + dx, ty + dy)]
-          if d && (best_d.nil? || d < best_d)
-            best_d = d
-            best = [tx + dx, ty + dy]
-          end
-        end
-        return best
-      end
-
-      best = nil
-      best_d = here
-      NEIGHBORS.each do |dx, dy|
-        d = @flow[chunk_key(tx + dx, ty + dy)]
-        if d && d < best_d
-          best_d = d
-          best = [tx + dx, ty + dy]
+    def remove_building!(building)
+      # TODO: add a width to buildings
+      building.tiles.times do |dx|
+        building.tiles.times do |dy|
+          key = chunk_key((building.x / @tile_size) + dx, (building.y / @tile_size) + dy)
+          @occupied.delete(key) #  if @occupied[key] #.equal?(building)
         end
       end
-      DIAGONALS.each do |dx, dy|
-        next if occupied?(tx + dx, ty) || occupied?(tx, ty + dy)
-        # Add +0.4 for diagonals as they cost extra to move.
-        d = @flow[chunk_key(tx + dx, ty + dy)]
-        if d && (d + 0.4) < best_d
-          best_d = d + 0.4
-          best = [tx + dx, ty + dy]
-        end
-      end
-      best
-    end
 
-    def creep_on_footprint?(tx, ty, w, h, enemies, ts)
-      enemies.any? do |e|
-        ex = (e.x / ts).floor
-        ey = (e.y / ts).floor
-        ex >= tx && ex < tx + w && ey >= ty && ey < ty + h
-      end
-    end
-
-    def would_block_path?(tx, ty, w, h, spawn, goal)
-      blocked = {}
-      w.times { |dx| h.times { |dy| blocked[chunk_key(tx + dx, ty + dy)] = true } }
-
-      visited = { chunk_key(goal[0], goal[1]) => true }
-      queue = [goal]
-      head = 0
-      while head < queue.length
-        cx, cy = queue[head]; head += 1
-        return false if cx == spawn[0] && cy == spawn[1]   # goal reaches spawn → not blocked
-        NEIGHBORS.each do |dx, dy|
-          nx = cx + dx; ny = cy + dy
-          next if nx < 0 || ny < 0 || nx >= @w || ny >= @h
-          k = chunk_key(nx, ny)
-          next if visited[k] || occupied?(nx, ny) || blocked[k]
-          visited[k] = true
-          queue << [nx, ny]
-        end
-      end
-      true   # never reached spawn → it would wall off the maze
+      @buildings.delete(building.id)
     end
   end
 end

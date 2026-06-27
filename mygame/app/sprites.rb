@@ -1,6 +1,8 @@
 module App
   SPRITES = {
     cannon: {
+      tiles: 2,
+      radius: 8,
       source_x: 8,
       source_y: 8,
       source_h: 32,

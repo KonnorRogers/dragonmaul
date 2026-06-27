@@ -2,7 +2,8 @@ module App
   class Character < SpriteKit::Sprite
     attr_accessor :target_x, :target_y, :target, :engine,
                   :speed, :animations, :hit_box, :state, :direction, :collision, :entity,
-                  :type, :id, :current_hp, :max_hp, :last_attack, :scale, :radius
+                  :type, :id, :current_hp, :max_hp, :last_attack, :scale, :radius,
+                  :attack_range, :attack_cooldown
 
     include AnimationMixin
 
@@ -30,7 +31,7 @@ module App
       @max_hp = kwargs.max_hp || 100
       @current_hp = kwargs.current_hp || @max_hp
       @attack_cooldown = kwargs.attack_cooldown || 2
-      @attack_range = kwargs.attack_range || 100
+      @attack_range = kwargs.attack_range || @w * 2
       @last_attack = kwargs.last_attack || 0
       @collision = kwargs.collision
       @target_x = kwargs.target_x || kwargs.x || 0
@@ -118,17 +119,22 @@ module App
     end
 
     def distance_from(target)
-      ExtendedGeometry.distance_between(self, target)
+      Geometry.distance(self, target)
     end
 
     def attack(target)
-      return if attack_on_cooldown?
-      return if out_of_range?(target)
+      return nil if attack_on_cooldown?
+      return nil if out_of_range?(target)
 
       @last_attack = @engine.tick_count
       damage = calc_attack
-      @engine.floating_text.add(damage, anchor: target, **{r: 0, b: 0, g: 0, a: 255})
-      target.take_damage(damage)
+
+      # if target
+      #   @engine.floating_text.add(damage, anchor: target, **{r: 0, b: 0, g: 0, a: 255})
+      #   target.take_damage(damage)
+      # end
+
+      damage
     end
 
     def take_damage(damage)

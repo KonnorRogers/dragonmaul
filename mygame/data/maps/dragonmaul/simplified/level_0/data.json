@@ -1,0 +1,107 @@
+{
+	"identifier": "level_0",
+	"uniqueIdentifer": "c3ba5590-48b0-11f1-ad58-03a218526657",
+	"x": 0,
+	"y": 0,
+	"width": 2560,
+	"height": 2560,
+	"bgColor": "#696A79",
+	"neighbourLevels": [],
+	"customFields" : {},
+	"layers": [
+		"int_grid.png"
+	],
+	"entities": {
+		"camera_start": [
+			{
+				"id": "camera_start",
+				"iid": "58af69f0-6fc0-11f1-804c-e9ef054d79b9",
+				"layer": "entities",
+				"x": 1248,
+				"y": 1264,
+				"width": 16,
+				"height": 16,
+				"color": 12470831,
+				"customFields": {
+					"camera_start": null
+				}
+			}
+		],
+		"spawn_points": [
+			{
+				"id": "spawn_points",
+				"iid": "5df5efc0-6fc0-11f1-804c-5ff719e5e915",
+				"layer": "entities",
+				"x": 400,
+				"y": 100,
+				"width": 16,
+				"height": 16,
+				"color": 16711748,
+				"customFields": {
+					"spawn_points": null
+				}
+			},
+			{
+				"id": "spawn_points",
+				"iid": "7a9a8c30-6fc0-11f1-804c-8132e4435cb5",
+				"layer": "entities",
+				"x": 2160,
+				"y": 100,
+				"width": 16,
+				"height": 16,
+				"color": 16711748,
+				"customFields": {
+					"spawn_points": null
+				}
+			}
+		],
+		"goal": [
+			{
+				"id": "goal",
+				"iid": "d80e12d0-6fc0-11f1-804c-617601daa87f",
+				"layer": "entities",
+				"x": 1264,
+				"y": 2448,
+				"width": 16,
+				"height": 16,
+				"color": 6539085,
+				"customFields" : {}
+			}
+		],
+		"waypoints": [
+			{
+				"id": "waypoints",
+				"iid": "7564c810-6fc0-11f1-804c-a35d781f7210",
+				"layer": "entities",
+				"x": 400,
+				"y": 1280,
+				"width": 16,
+				"height": 16,
+				"color": 2943221,
+				"customFields" : {}
+			},
+			{
+				"id": "waypoints",
+				"iid": "bbd1a6b0-6fc0-11f1-a069-2301bcd3560e",
+				"layer": "entities",
+				"x": 2160,
+				"y": 1280,
+				"width": 16,
+				"height": 16,
+				"color": 2943221,
+				"customFields" : {}
+			},
+			{
+				"id": "waypoints",
+				"iid": "cb2db040-6fc0-11f1-a069-af07586c1277",
+				"layer": "entities",
+				"x": 1280,
+				"y": 1280,
+				"width": 16,
+				"height": 16,
+				"color": 2943221,
+				"customFields" : {}
+			}
+		]
+	}
+}
