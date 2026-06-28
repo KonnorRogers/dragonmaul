@@ -1,5 +1,7 @@
 module App
   class Enemy < Character
+    attr_accessor :segment
+
     def move()
       # return if moving?(e)              # already sliding — ignore input
 

@@ -77,7 +77,7 @@ module App
         y = h - point["y"] - 100
         @spawn_points << {
           x: (point["x"] / grid_size) * (@tile_size / grid_size),
-          y: (y / grid_size) * (@tile_size / grid_size)
+          y: (y / grid_size) * (@tile_size / grid_size),
         }
       end
 
@@ -93,15 +93,16 @@ module App
         h: @tile_size * 3,
       }
 
-      # waypoints = data["entities"]["waypoints"]
+      waypoints = data["entities"]["waypoints"]
 
-      # @waypoints = []
-      # waypoints.each do |wp|
-      #   @waypoints << {
-      #     x: wp["x"] / grid_size,
-      #     y: (h - wp["y"]) / grid_size
-      #   }
-      # end
+      @waypoints = []
+      waypoints.each do |wp|
+        @waypoints << {
+          x: wp["x"] / grid_size,
+          y: (h - wp["y"]) / grid_size,
+          order: (wp.dig("customFields", "order")) || 0,
+        }
+      end
 
       int_grid_csv.each_with_index do |value, i|
         next if value.zero?           # skip empty cells

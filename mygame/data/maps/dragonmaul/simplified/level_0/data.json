@@ -78,7 +78,9 @@
 				"width": 16,
 				"height": 16,
 				"color": 2943221,
-				"customFields" : {}
+				"customFields": {
+					"order": 0
+				}
 			},
 			{
 				"id": "waypoints",
@@ -89,7 +91,9 @@
 				"width": 16,
 				"height": 16,
 				"color": 2943221,
-				"customFields" : {}
+				"customFields": {
+					"order": 0
+				}
 			},
 			{
 				"id": "waypoints",
@@ -100,7 +104,9 @@
 				"width": 16,
 				"height": 16,
 				"color": 2943221,
-				"customFields" : {}
+				"customFields": {
+					"order": 1
+				}
 			}
 		]
 	}

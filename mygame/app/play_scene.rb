@@ -23,9 +23,9 @@ module App
       @tile_size = 16
       @current_wave = 0
       @map = App::Map.new(w: w, h: h, tile_size: @tile_size)
-      @graph = Graph.new(map: @map)
+      @graph = Graph.new(map: @map, waypoints: @map.waypoints, goal: @map.goal_tile)
       @camera = SpriteKit::Camera.new(path: :camera)
-
+      @flows_dirty = false
       @enemies_to_spawn = 50
       # @zoom = {
       #   default: 1,
@@ -77,15 +77,19 @@ module App
     end
 
     def tick(args)
-      args.outputs.debug << "#{@map.camera_start}"
-      args.outputs.debug << "#{@camera.scale}; #{@camera.x}, #{@camera.y}"
+
+      # args.outputs.debug << "#{@map.camera_start}"
+      # args.outputs.debug << "#{@camera.scale}; #{@camera.x}, #{@camera.y}"
       @debug_renderables = []
       render_camera_target(args)
       @world_mouse = @camera.to_world_space(args.inputs.mouse)
 
-      if !@graph.flow
+      if @flows_dirty
         # the initial one, and inside place_building! / attack_tower
-        @graph.compute(@map.goal_tile)
+        t = Time.now.to_f
+        @graph.recompute
+        puts "recompute: #{((Time.now.to_f - t) * 1000).round(2)}ms, tiles=#{@map.tiles.size}"
+        @flows_dirty = false
       end
 
       if @enemies_to_spawn != 0
@@ -222,7 +226,7 @@ module App
           @camera.to_screen_space!({
             x: t.x,
             y: t.y,
-            text: @graph.flow[@map.chunk_key((t.x / @map.tile_size).floor, (t.y / @map.tile_size).floor)],
+            text: @graph.flows.last[:flow][@map.chunk_key((t.x / @map.tile_size).floor, (t.y / @map.tile_size).floor)],
             size_px: size_px,
             anchor_x: 0,
             anchor_y: 0,
@@ -303,6 +307,20 @@ module App
 
           @debug_renderables.concat(debug_path)
         end
+
+        @debug_renderables.concat(@map.waypoints.map do |wp|
+          @camera.to_screen_space!({
+            x: wp.x * @tile_size,
+            y: wp.y * @tile_size,
+            w: @tile_size,
+            h: @tile_size,
+            r: 255,
+            b: 0,
+            g: 128,
+            a: 255,
+            path: :pixel
+          })
+        end)
       end
 
       enemies = []
@@ -393,7 +411,7 @@ module App
           clicked_button.on_click.call(inputs.mouse)
         elsif @current_building && @placement_valid
           @map.place_building!(@current_building, tile_x: @placement_tx, tile_y: @placement_ty)
-          @graph.compute(@map.goal_tile)
+          @flows_dirty = true
           # keep placing if shift held (classic TD UX), else exit placement mode
           @current_building = nil unless @inputs.keyboard.shift
         elsif @debug && (clicked_tile = Geometry.find_intersect_rect(@world_mouse, @map.tiles_in_viewport(@camera)))
@@ -550,7 +568,10 @@ module App
       ts = @map.tile_size
       current_tile = { x: (e.x / ts).floor, y: (e.y / ts).floor }
 
-      step = @graph.next_step(current_tile)
+      e.segment ||= @graph.initial_segment(current_tile)   # = 0
+      e.segment = @graph.advance_segment(current_tile, e.segment)
+
+      step = @graph.next_step(current_tile, e.segment)
       if step
         e.state = :walking
         move_toward(e, (step.x + 0.5) * ts, (step.y + 0.5) * ts)
@@ -582,12 +603,11 @@ module App
       end
 
       # blocked: follow the wall-ignoring flow toward the goal
-      step = @graph.attack_next_step(current_tile, e.seg)
+      step = @graph.attack_next_step(current_tile, e.segment)
       unless step
         e.state = :idle
         return
       end
-
       e.state = :walking
       move_toward(e, (step.x + 0.5) * ts, (step.y + 0.5) * ts)
     end
@@ -621,7 +641,7 @@ module App
 
       if damage && @map.damage_building!(tower, damage)
         # wall breached: refresh both flows
-        @graph.compute(@map.goal_tile)
+        @flows_dirty = true
       end
     end
 
@@ -670,6 +690,51 @@ module App
 
         @map.place_building!(building, tile_x: x, tile_y: y)
       end
+    end
+    # true if no occupied tile lies between tile a and tile b
+    def line_of_sight?(ax, ay, bx, by)
+      dx = (bx - ax).abs
+      dy = (by - ay).abs
+      x, y = ax, ay
+      sx = ax < bx ? 1 : -1
+      sy = ay < by ? 1 : -1
+      err = dx - dy
+      loop do
+        return true if x == bx && y == by
+        return false if @map.occupied?(x, y)
+        e2 = 2 * err
+        if e2 > -dy
+          err -= dy
+          x += sx
+        end
+        if e2 < dx
+          err += dx
+          y += sy
+        end
+      end
+    end
+
+    # follow the greedy field path, but return the FURTHEST tile we can
+    # reach in a straight line — that's the tile to actually steer toward
+    def steer_target(current_tile, flow: @graph.flow, lookahead: 12)
+      # build the greedy path ahead
+      path = []
+      from = current_tile
+      lookahead.times do
+        nxt = next_step(from, flow: flow)
+        break if nxt.nil?
+        path << nxt
+        from = nxt
+        break if flow[@map.chunk_key(nxt.x, nxt.y)] == 0  # reached goal
+      end
+      return current_tile if path.empty?
+
+      # pick the furthest path tile with clear line-of-sight from where we are
+      target = path.first
+      path.each do |t|
+        target = t if line_of_sight?(current_tile.x, current_tile.y, t.x, t.y)
+      end
+      target
     end
   end
 end
