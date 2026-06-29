@@ -89,6 +89,7 @@ module App
         # t = Time.now.to_f
         # @graph.recompute
         # puts "recompute: #{((Time.now.to_f - t) * 1000).round(2)}ms, tiles=#{@map.tiles.size}"
+
         @graph.begin_recompute
         @flows_dirty = false
       end

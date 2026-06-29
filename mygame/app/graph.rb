@@ -1,5 +1,6 @@
 module App
   class Graph
+    ARRAY_FILL = -1
     STEPS = [
       # [dx, dy, cost]
       # Cardinal Directions
@@ -22,15 +23,15 @@ module App
                 .map      { |_, group| group }
       @stages = sorted_stages + [[goal]]
       @unobstructed ||= @stages.map { |goals| build_flow(goals: goals, ignore_occupied: true) }
-      @flow_buffers = @stages.map { Array.new(@map.w * @map.h, -1) }   # one scratch buffer per stage
-      @flow_buffers_back = @stages.map { Array.new(@map.w * @map.h, -1) }
+      @flow_buffers = @stages.map { Array.new(@map.w * @map.h, ARRAY_FILL) }   # one scratch buffer per stage
+      @flow_buffers_back = @stages.map { Array.new(@map.w * @map.h, ARRAY_FILL) }
       @last_segment = @stages.length - 1
       @recomputing = false
       @recompute_queue = []
       recompute
     end
 
-    def recompute(fiber: false)
+    def recompute
       # call THIS on tower placement / wall breach, not full compute
       flows = @stages.each_with_index.map do |goals, i|
         {
@@ -106,7 +107,7 @@ module App
     end
     # allocating version — used once for the cached unobstructed fields
     def build_flow(goals:, ignore_occupied:)
-      build_flow!(Array.new(@map.w * @map.h, -1), goals: goals, ignore_occupied: ignore_occupied)
+      build_flow!(Array.new(@map.w * @map.h, ARRAY_FILL), goals: goals, ignore_occupied: ignore_occupied)
     end
 
     # reusing version — used every recompute for the obstructed fields
@@ -116,13 +117,13 @@ module App
       h = @map.h.to_i
 
       # clear the buffer in place (mruby Array#fill(nil) rejects this form)
-      i = 0
-      n = flow.length
+      # i = 0
+      # n = flow.length
       # while i < n
       #   flow[i] = nil
       #   i += 1
       # end
-      flow.fill(-1)
+      flow.fill(ARRAY_FILL)
 
       ground = @map.ground_bits
       blocked = @map.occupied_bits
@@ -151,7 +152,8 @@ module App
 
           nidx = y * w + x
           next unless ground[nidx]
-          next if flow[nidx] != -1
+
+          next if flow[nidx] != ARRAY_FILL
           next if !ignore_occupied && blocked[nidx]
 
           flow[nidx] = dist + s[2]
@@ -163,7 +165,12 @@ module App
 
     def at(flow, x, y)
       return nil if x < 0 || y < 0 || x >= @map.w || y >= @map.h
-      flow[y * @map.w + x]
+
+      v = flow[y * @map.w + x]
+
+      return nil if v == ARRAY_FILL
+
+      v
     end
 
     def cost_at(seg, x, y)
