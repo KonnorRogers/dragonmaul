@@ -86,11 +86,14 @@ module App
 
       if @flows_dirty
         # the initial one, and inside place_building! / attack_tower
-        t = Time.now.to_f
-        @graph.recompute
-        puts "recompute: #{((Time.now.to_f - t) * 1000).round(2)}ms, tiles=#{@map.tiles.size}"
+        # t = Time.now.to_f
+        # @graph.recompute
+        # puts "recompute: #{((Time.now.to_f - t) * 1000).round(2)}ms, tiles=#{@map.tiles.size}"
+        @graph.begin_recompute
         @flows_dirty = false
       end
+
+      @graph.step_recompute   # cheap no-op when not recomputing; floods one stage when it is
 
       if @enemies_to_spawn != 0
         spawn_enemies
@@ -189,7 +192,7 @@ module App
       screen_renderables = [map_png].map do |c|
         @camera.to_screen_space(c)
       end
-      # size = @map.chunk_px
+      size = @map.chunk_px
       # screen_renderables = @map.chunks_in_viewport(@camera).map do |c|
       #   @map.ensure_chunk_rendered(args, c.cx, c.cy)
       #   sprite = { x: c.cx * size, y: c.cy * size, w: size, h: size, path: @map.rt_name(c.cx, c.cy) }
@@ -226,7 +229,7 @@ module App
           @camera.to_screen_space!({
             x: t.x,
             y: t.y,
-            text: @graph.flows.last[:flow][@map.chunk_key((t.x / @map.tile_size).floor, (t.y / @map.tile_size).floor)],
+            text: @graph.cost_at(@graph.flows.length - 1, (t.x / @map.tile_size).floor, (t.y / @map.tile_size).floor),
             size_px: size_px,
             anchor_x: 0,
             anchor_y: 0,
@@ -578,7 +581,7 @@ module App
         return
       end
 
-      surrounding_tiles = Graph::NEIGHBORS_AND_DIAGONALS
+      surrounding_tiles = Graph::STEPS
 
       tower_nearby = nil
 

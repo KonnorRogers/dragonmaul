@@ -1,6 +1,6 @@
 module App
   class Map
-    attr_accessor :w, :h, :tile_size, :tiles, :chunk_px, :occupied, :buildings, :camera_start, :spawn_points, :goal, :goal_tile, :waypoints
+    attr_accessor :w, :h, :tile_size, :tiles, :chunk_px, :occupied, :buildings, :camera_start, :spawn_points, :goal, :goal_tile, :waypoints, :ground_bits, :occupied_bits
 
     CHUNK_TILES = 32  # 32x32 tiles per chunk = 512px at tile_size 16
 
@@ -21,6 +21,7 @@ module App
 
       # generate
       load_level
+
     end
 
     # Pack individual tile coords into a hash key
@@ -58,8 +59,8 @@ module App
       int_grid_csv = int_grid["intGridCsv"]
 
 
-      @w = int_grid["__cWid"]
-      @h = int_grid["__cHei"]
+      @w = int_grid["__cWid"].to_i
+      @h = int_grid["__cHei"].to_i
 
       @tiles = {}
       grid_size = int_grid["__gridSize"]   # px-per-cell LDtk authored with (likely 16)
@@ -76,15 +77,16 @@ module App
         # y is flipped in DR compared to LDTK
         y = h - point["y"] - 100
         @spawn_points << {
-          x: (point["x"] / grid_size) * (@tile_size / grid_size),
-          y: (y / grid_size) * (@tile_size / grid_size),
+          x: ((point["x"] / grid_size) * (@tile_size / grid_size)).to_i,
+          y: ((y / grid_size) * (@tile_size / grid_size)).to_i,
         }
+
       end
 
       @goal_tile = {}
       goal = data["entities"]["goal"][0]
-      @goal_tile.x = goal["x"] / grid_size
-      @goal_tile.y = (h - goal["y"]) / grid_size
+      @goal_tile.x = (goal["x"] / grid_size).to_i
+      @goal_tile.y = ((h - goal["y"]) / grid_size).to_i
 
       @goal = {
         x: @goal_tile.x * @tile_size,
@@ -98,8 +100,8 @@ module App
       @waypoints = []
       waypoints.each do |wp|
         @waypoints << {
-          x: wp["x"] / grid_size,
-          y: (h - wp["y"]) / grid_size,
+          x: (wp["x"] / grid_size).to_i,
+          y: ((h - wp["y"]) / grid_size).to_i,
           order: (wp.dig("customFields", "order")) || 0,
         }
       end
@@ -113,6 +115,15 @@ module App
         @tiles[chunk_key(x, y)] = :ground
       end
       # puts "columns: #{col}, rows: #{row}"
+      # end of load_level, after @tiles is fully populated:
+      @ground_bits   = Array.new(@w * @h, false)
+      @occupied_bits = Array.new(@w * @h, false)
+      @tiles.each_key do |key|
+        cx = key & 0xFFFF
+        cx -= 65_536 if cx > 32_767
+        cy = key >> 16
+        @ground_bits[cy * @w + cx] = true
+      end
     end
 
     def tiles_in_viewport(camera, largest_tile: @tile_size)
@@ -205,7 +216,9 @@ module App
     def occupy!(tx, ty, w_tiles, h_tiles, building)
       w_tiles.times do |dx|
         h_tiles.times do |dy|
-          @occupied[chunk_key(tx + dx, ty + dy)] = building
+          x = tx + dx; y = ty + dy
+          @occupied[chunk_key(x, y)] = building
+          @occupied_bits[y * @w + x] = true if x >= 0 && y >= 0 && x < @w && y < @h
         end
       end
     end
@@ -274,14 +287,15 @@ module App
     end
 
     def remove_building!(building)
-      # TODO: add a width to buildings
+      bx = (building.x / @tile_size).to_i
+      by = (building.y / @tile_size).to_i
       building.tiles.times do |dx|
         building.tiles.times do |dy|
-          key = chunk_key((building.x / @tile_size) + dx, (building.y / @tile_size) + dy)
-          @occupied.delete(key) #  if @occupied[key] #.equal?(building)
+          x = bx + dx; y = by + dy
+          @occupied.delete(chunk_key(x, y))
+          @occupied_bits[y * @w + x] = false if x >= 0 && y >= 0 && x < @w && y < @h
         end
       end
-
       @buildings.delete(building.id)
     end
   end

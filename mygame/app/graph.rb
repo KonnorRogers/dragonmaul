@@ -1,19 +1,12 @@
 module App
   class Graph
-    NEIGHBORS = [
-      [0, 1],  # right
-      [0, -1], # left
-      [1, 0],  # up
-      [-1, 0]  # down
-    ]
-    DIAGONALS = [
-      [1, 1], # right-up
-      [1, -1], # right-down
-      [-1, 1], # left-up
-      [-1, -1] # left-down
-    ]
-
-    NEIGHBORS_AND_DIAGONALS = NEIGHBORS + DIAGONALS
+    STEPS = [
+      # [dx, dy, cost]
+      # Cardinal Directions
+      [0, 1, 10], [0, -1, 10], [1, 0, 10], [-1, 0, 10],
+      # Diagonal Directions
+      [1, 1, 14], [1, -1, 14], [-1, 1, 14], [-1, -1, 14]
+    ].freeze
 
     attr_accessor :flows
 
@@ -24,12 +17,16 @@ module App
 
       @goal = goal
       sorted_stages = waypoints
-                .group_by { |wp| wp[:order] || 1 }
+                .group_by { |wp| wp[:order] || 0 }
                 .sort_by  { |order, _| order }
                 .map      { |_, group| group }
       @stages = sorted_stages + [[goal]]
       @unobstructed ||= @stages.map { |goals| build_flow(goals: goals, ignore_occupied: true) }
+      @flow_buffers = @stages.map { Array.new(@map.w * @map.h, -1) }   # one scratch buffer per stage
+      @flow_buffers_back = @stages.map { Array.new(@map.w * @map.h, -1) }
       @last_segment = @stages.length - 1
+      @recomputing = false
+      @recompute_queue = []
       recompute
     end
 
@@ -38,7 +35,7 @@ module App
       flows = @stages.each_with_index.map do |goals, i|
         {
           goals:             goals,
-          flow:              build_flow(goals: goals, ignore_occupied: false),
+          flow:              build_flow!(@flow_buffers[i], goals: goals, ignore_occupied: false),
           unobstructed_flow: @unobstructed[i],
         }
       end
@@ -61,15 +58,13 @@ module App
 
     WAYPOINT_RADIUS = 14   # path-cost units (~1 diagonal tile); bump to 20 for an earlier turn
 
-    # close enough by path distance to count as reaching this stage
     def near_stage?(tile, seg)
-      cost = @flows[seg][:flow][@map.chunk_key(tile.x, tile.y)]
+      cost = at(@flows[seg][:flow], tile.x, tile.y)
       return cost <= WAYPOINT_RADIUS if cost
-      # tile not covered by this stage's field (walled off mid-route) —
-      # fall back to straight-line proximity so we can still advance
       g = nearest_goal(tile, seg)
       ((g.x - tile.x).abs + (g.y - tile.y).abs) <= 1
     end
+
 
     # exactly on a goal of this stage (used only to stop stepping at the final goal)
     def on_stage_goal?(tile, seg)
@@ -96,10 +91,10 @@ module App
 
     def best_neighbor(current_tile, flow)
       best = nil
-      NEIGHBORS_AND_DIAGONALS.each do |dx, dy|
+      STEPS.each do |dx, dy, _cost|
         x = current_tile.x + dx
         y = current_tile.y + dy
-        cost = flow[@map.chunk_key(x, y)]
+        cost = at(flow, x, y)
         next unless cost
         best = { x: x, y: y, cost: cost } if best.nil? || cost < best[:cost]
       end
@@ -109,31 +104,70 @@ module App
     def attack_next_step(current_tile, seg)
       next_step(current_tile, seg, attack: true)
     end
-
-    def add_to_frontier(flow:, frontier:, cost:, x:, y:, ignore_occupied:)
-      key = @map.chunk_key(x, y)
-      return if !@map.tiles.key?(key)
-      return if flow.key?(key)
-      return if !ignore_occupied && @map.occupied?(x, y)
-      flow[key] = cost
-      frontier << { x: x, y: y }
-    end
+    # allocating version — used once for the cached unobstructed fields
     def build_flow(goals:, ignore_occupied:)
-      flow = {}
+      build_flow!(Array.new(@map.w * @map.h, -1), goals: goals, ignore_occupied: ignore_occupied)
+    end
+
+    # reusing version — used every recompute for the obstructed fields
+    # This is a very _tight_ method that has already been refactored from 200ms down to 50ms. There's probably more ways to make it faster, but this is goood for now.
+    def build_flow!(flow, goals:, ignore_occupied:)
+      w = @map.w.to_i
+      h = @map.h.to_i
+
+      # clear the buffer in place (mruby Array#fill(nil) rejects this form)
+      i = 0
+      n = flow.length
+      # while i < n
+      #   flow[i] = nil
+      #   i += 1
+      # end
+      flow.fill(-1)
+
+      ground = @map.ground_bits
+      blocked = @map.occupied_bits
       frontier = []
-      goals.each { |g| flow[@map.chunk_key(g.x, g.y)] = 0; frontier << g }
+      goals.each do |g|
+        idx = g.y.to_i * w + g.x.to_i
+        flow[idx] = 0
+        frontier << idx
+      end
+
       head = 0
-      visits = 0
       while head < frontier.length
-        current = frontier[head]; head += 1
-        visits += 1
-        dist = flow[@map.chunk_key(current.x, current.y)]
-        NEIGHBORS_AND_DIAGONALS.each do |dx, dy|
-          add_to_frontier(flow: flow, frontier: frontier, cost: dist + 10, x: current.x + dx, y: current.y + dy, ignore_occupied: ignore_occupied)
+        idx = frontier[head]
+        head += 1
+        cx = idx % w
+        cy = idx.idiv(w)
+        dist = flow[idx]
+        si = 0
+        while si < 8
+          s = STEPS[si]
+          si += 1
+          x = cx + s[0]
+          y = cy + s[1]
+
+          next if x < 0 || y < 0 || x >= w || y >= h
+
+          nidx = y * w + x
+          next unless ground[nidx]
+          next if flow[nidx] != -1
+          next if !ignore_occupied && blocked[nidx]
+
+          flow[nidx] = dist + s[2]
+          frontier << nidx
         end
       end
-      puts "  one flood: visits=#{visits} frontier.len=#{frontier.length}"
       flow
+    end
+
+    def at(flow, x, y)
+      return nil if x < 0 || y < 0 || x >= @map.w || y >= @map.h
+      flow[y * @map.w + x]
+    end
+
+    def cost_at(seg, x, y)
+      at(@flows[seg][:flow], x, y)
     end
 
     # def build_flow(goals:, ignore_occupied:)
@@ -173,6 +207,30 @@ module App
         from = nxt
       end
       path
+    end
+    # kick off a sliced recompute (call on tower placed / wall breached)
+    def begin_recompute
+      @recompute_queue = (0...@stages.length).to_a
+      @recomputing = true
+    end
+
+    def recomputing?
+      !!@recomputing
+    end
+
+    # advance one stage per call; publish + swap when all stages are rebuilt.
+    # floods into the BACK buffers so enemies keep reading the live ones.
+    def step_recompute
+      return unless @recomputing
+      i = @recompute_queue.shift
+      build_flow!(@flow_buffers_back[i], goals: @stages[i], ignore_occupied: false)
+      if @recompute_queue.empty?
+        @flow_buffers, @flow_buffers_back = @flow_buffers_back, @flow_buffers
+        @flows = @stages.each_with_index.map do |goals, j|
+          { goals: goals, flow: @flow_buffers[j], unobstructed_flow: @unobstructed[j] }
+        end
+        @recomputing = false
+      end
     end
   end
 end
